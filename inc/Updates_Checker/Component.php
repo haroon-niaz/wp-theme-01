@@ -37,7 +37,7 @@ class Component implements Component_Interface {
 	 * Check for Updates.
 	 */
 	public function update_checker() {
-		echo 'Test';
+		echo 'Test Function';
 		$update_checker = \Puc_v4_Factory::buildUpdateChecker(
 			'https://rtshub.com/rtshub-updates/update-server/?action=get_metadata&slug=wp_rig',
 			__FILE__,
