@@ -28,7 +28,6 @@ class Component implements Component_Interface {
 	 * Adds the action and filter hooks to integrate with WordPress.
 	 */
 	public function initialize() {
-		echo 'Test Init';
 		require_once __DIR__ . '/update-checker.php';
 		add_action( 'admin_init', array( $this, 'update_checker' ) );
 	}
@@ -37,10 +36,9 @@ class Component implements Component_Interface {
 	 * Check for Updates.
 	 */
 	public function update_checker() {
-		echo 'Test Function';
 		$update_checker = \Puc_v4_Factory::buildUpdateChecker(
 			'https://rtshub.com/rtshub-updates/update-server/?action=get_metadata&slug=wp_rig',
-			__FILE__,
+			get_template_directory(),
 			'wp_rig'
 		);
 	}
