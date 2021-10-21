@@ -62,5 +62,17 @@ if ( file_exists( get_template_directory() . '/vendor/autoload.php' ) ) {
 // Load the `wp_rig()` entry point function.
 require get_template_directory() . '/inc/functions.php';
 
+require_once get_template_directory() . '/inc/Updates_Checker/update-checker1.php';
+$update_checker = Puc_v4_Factory::buildUpdateChecker(
+	'https://rtshub.com/rtshub-updates/update-server/?action=get_metadata&slug=wp_rig',
+	__FILE__,
+	'wp_rig'
+);
+echo 'test';
+exit;
+
+
 // Initialize the theme.
 call_user_func( 'WP_Rig\WP_Rig\wp_rig' );
+
+

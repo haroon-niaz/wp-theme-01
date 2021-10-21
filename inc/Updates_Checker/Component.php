@@ -29,7 +29,7 @@ class Component implements Component_Interface {
 	 */
 	public function initialize() {
 		echo 'Test Init';
-		include __DIR__ . '/update-checker1.php';
+		require_once __DIR__ . '/update-checker.php';
 		add_action( 'plugins_loaded', array( $this, 'update_checker' ) );
 	}
 
