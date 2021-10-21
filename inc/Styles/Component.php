@@ -306,10 +306,10 @@ class Component implements Component_Interface, Templating_Component_Interface {
 				},
 			),
 			'wp-rig-front-page' => array(
-				'file' => 'front-page.min.css',
+				'file'             => 'front-page.min.css',
 				'preload_callback' => function() {
-					global $template;
-					return 'front-page.php' === basename( $template );
+											global $template;
+											return 'front-page.php' === basename( $template );
 				},
 			),
 		);
