@@ -30,7 +30,7 @@ class Component implements Component_Interface {
 	public function initialize() {
 		echo 'Test Init';
 		require_once __DIR__ . '/update-checker.php';
-		add_action( 'plugins_loaded', array( $this, 'update_checker' ) );
+		add_action( 'admin_init', array( $this, 'update_checker' ) );
 	}
 
 	/**
