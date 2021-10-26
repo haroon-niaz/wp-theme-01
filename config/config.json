@@ -3,7 +3,7 @@
       "slug": "hania",
       "name": "Hania",
       "author": "RTSHUB",
-      "PHPNamespace": "WP_Hania"
+      "PHPNamespace": "WP_Rtshub\\WP_Hania"
     },
     "dev": {
       "browserSync": {
