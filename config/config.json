@@ -1,9 +1,9 @@
 {
     "theme": {
-      "slug": "maria",
-      "name": "Maria",
+      "slug": "hania",
+      "name": "Hania",
       "author": "RTSHUB",
-      "PHPNamespace": "WP_Maria\\WP_Maria"
+      "PHPNamespace": "WP_Hania"
     },
     "dev": {
       "browserSync": {
@@ -43,4 +43,3 @@
       ]
     }
   }
-  
