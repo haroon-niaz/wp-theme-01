@@ -153,6 +153,10 @@ class Theme {
 			new Styles\Component(),
 			new Excerpts\Component(),
 			new Updates_Checker\Component(),
+			new Entry_Title\Component(),
+			new Options\Component(),
+			new Layout\Component(),
+			new Custom_Footer\Component(),
 		);
 
 		if ( defined( 'JETPACK__VERSION' ) ) {

@@ -9,6 +9,10 @@ namespace WP_Rig\WP_Rig\Base_Support;
 
 use WP_Rig\WP_Rig\Component_Interface;
 use WP_Rig\WP_Rig\Templating_Component_Interface;
+use WP_Upgrader;
+use WP_Ajax_Upgrader_Skin;
+use Plugin_Upgrader;
+use function WP_Rig\WP_Rig\wp_rig;
 use function add_action;
 use function add_filter;
 use function add_theme_support;
@@ -19,15 +23,62 @@ use function get_bloginfo;
 use function wp_scripts;
 use function wp_get_theme;
 use function get_template;
+use function plugins_api;
+use function activate_plugin;
+use function get_site_option;
+use function is_customize_preview;
 
 /**
  * Class for adding basic theme support, most of which is mandatory to be implemented by all themes.
  *
  * Exposes template tags:
  * * `wp_rig()->get_version()`
+ * * `wp_rig()->get_post_types()`
  * * `wp_rig()->get_asset_version( string $filepath )`
  */
 class Component implements Component_Interface, Templating_Component_Interface {
+
+	/**
+	 * Holds post types.
+	 *
+	 * @var values of all the post types.
+	 */
+	protected static $post_types = null;
+
+	/**
+	 * Holds post types.
+	 *
+	 * @var values of all the post types.
+	 */
+	protected static $post_types_objects = null;
+
+	/**
+	 * Holds ignore post types.
+	 *
+	 * @var values of all the post types.
+	 */
+	protected static $ignore_post_types = null;
+
+	/**
+	 * Holds ignore post types.
+	 *
+	 * @var values of all the post types.
+	 */
+	protected static $public_ignore_post_types = null;
+
+	/**
+	 * Holds ignore post types.
+	 *
+	 * @var values of all the post types.
+	 */
+	protected static $transparent_ignore_post_types = null;
+
+	/**
+	 * Static var active plugins
+	 *
+	 * @var $active_plugins
+	 */
+	private static $active_plugins;
 
 	/**
 	 * Gets the unique identifier for the theme component.
@@ -43,11 +94,293 @@ class Component implements Component_Interface, Templating_Component_Interface {
 	 */
 	public function initialize() {
 		add_action( 'after_setup_theme', array( $this, 'action_essential_theme_support' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'install_starter_script' ) );
+		add_action( 'admin_notices', array( $this, 'wp_rig_starter_templates_notice' ) );
+		add_action( 'admin_notices', array( $this, 'wp_rig_turn_off_gutenberg_plugin_notice' ) );
+		add_action( 'wp_ajax_wp_rig_dismiss_notice', array( $this, 'ajax_dismiss_starter_notice' ) );
+		add_action( 'wp_ajax_wp_rig_dismiss_gutenberg_notice', array( $this, 'ajax_dismiss_gutenberg_notice' ) );
+		add_action( 'wp_ajax_wp_rig_install_starter', array( $this, 'install_plugin_ajax_callback' ) );
 		add_action( 'wp_head', array( $this, 'action_add_pingback_header' ) );
+		add_action( 'wp_head', array( $this, 'action_add_no_js_remove_script' ), 2 );
 		add_filter( 'body_class', array( $this, 'filter_body_classes_add_hfeed' ) );
 		add_filter( 'embed_defaults', array( $this, 'filter_embed_dimensions' ) );
 		add_filter( 'theme_scandir_exclusions', array( $this, 'filter_scandir_exclusions_for_optional_templates' ) );
 		add_filter( 'script_loader_tag', array( $this, 'filter_script_loader_tag' ), 10, 2 );
+		add_filter( 'body_class', array( $this, 'filter_body_classes_add_link_style' ) );
+		add_filter( 'get_search_form', array( $this, 'add_search_icon' ), 99 );
+		add_filter( 'get_product_search_form', array( $this, 'add_search_icon' ), 99 );
+		add_filter( 'embed_oembed_html', array( $this, 'classic_embed_wrap' ), 90, 4 );
+		add_filter( 'excerpt_length', array( $this, 'custom_excerpt_length' ) );
+		add_filter( 'the_author_description', 'wpautop' );
+	}
+	/**
+	 * Add Notice for wp_rig Starter templates
+	 */
+	public function wp_rig_starter_templates_notice() {
+		if ( defined( 'WP_RIG_STARTER_TEMPLATES_VERSION' ) || get_option( 'wp_rig_starter_plugin_notice' ) || ! current_user_can( 'install_plugins' ) ) {
+			return;
+		}
+		$installed_plugins = get_plugins();
+		if ( ! isset( $installed_plugins['wp-rig-starter-templates/wp-rig-starter-templates.php'] ) ) {
+			$button_label = esc_html__( 'Install WP Rig Starter Templates', 'wp-rig' );
+			$data_action  = 'install';
+		} elseif ( ! self::active_plugin_check( 'wp-rig-starter-templates/wp-rig-starter-templates.php' ) ) {
+			$button_label = esc_html__( 'Activate WP Rig Starter Templates', 'wp-rig' );
+			$data_action  = 'activate';
+		} else {
+			return;
+		}
+		?>
+		<div id="wp-rig-notice-starter-templates" class="notice is-dismissible notice-info">
+			<h2 class="notice-title"><?php echo esc_html__( 'Thanks for choosing the WP Rig Theme!', 'wp-rig' ); ?></h2>
+			<p class="wp-rig-notice-description"><?php /* translators: %s: <strong> <a> */ printf( esc_html__( 'Want to get started with a beautiful %1$sstarter template%2$s? Install the WP Rig Starter Templates plugin to launch an optimized design in minutes.', 'wp-rig' ), '<a href="https://wordpress.org/plugins/wp-rig-starter-templates/" target="_blank">', '</a>', '<strong>', '</strong>' ); ?></p>
+			<p class="install-submit">
+				<button class="button button-primary wp-rig-install-starter-btn" data-redirect-url="<?php echo esc_url( admin_url( 'themes.php?page=wp-rig-starter-templates' ) ); ?>" data-activating-label="<?php echo esc_attr__( 'Activating...', 'wp-rig' ); ?>" data-activated-label="<?php echo esc_attr__( 'Activated', 'wp-rig' ); ?>" data-installing-label="<?php echo esc_attr__( 'Installing...', 'wp-rig' ); ?>" data-installed-label="<?php echo esc_attr__( 'Installed', 'wp-rig' ); ?>" data-action="<?php echo esc_attr( $data_action ); ?>"><?php echo esc_html( $button_label ); ?></button>
+			</p>
+		</div>
+		<?php
+		wp_enqueue_script( 'wp-rig-starter-install' );
+		wp_localize_script(
+			'wp-rig-starter-install',
+			'wprigStarterInstall',
+			array(
+				'ajax_url'   => admin_url( 'admin-ajax.php' ),
+				'ajax_nonce' => wp_create_nonce( 'wp-rig-ajax-verification' ),
+				'status'     => $data_action,
+			)
+		);
+	}
+	/**
+	 * Add Notice for to not use the Gutenberg Plugin
+	 */
+	public function wp_rig_turn_off_gutenberg_plugin_notice() {
+		if ( ! defined( 'GUTENBERG_VERSION' ) || get_option( 'wp_rig_disable_gutenberg_notice' ) || ! current_user_can( 'install_plugins' ) ) {
+			return;
+		}
+		?>
+		<div id="wp-rig-notice-gutenberg-plugin" class="notice is-dismissible notice-warning">
+			<h2 class="notice-title"><?php echo esc_html__( 'Gutenberg Plugin Detected', 'wp-rig' ); ?></h2>
+			<p class="wp-rig-notice-description"><?php /* translators: %s: <a> */ printf( esc_html__( 'The %1$sGutenberg plugin%2$s is not recommended for use in a production site. Many things may be broken by using this plugin. Please deactivate.', 'wp-rig' ), '<a href="https://wordpress.org/plugins/gutenberg/" target="_blank">', '</a>' ); ?></p>
+		</div>
+		<?php
+		wp_enqueue_script( 'wp-rig-gutenberg-deactivate' );
+		wp_localize_script(
+			'wp-rig-gutenberg-deactivate',
+			'wprigGutenbergDeactivate',
+			array(
+				'ajax_url'   => admin_url( 'admin-ajax.php' ),
+				'ajax_nonce' => wp_create_nonce( 'wp-rig-ajax-verification' ),
+			)
+		);
+	}
+	/**
+	 * Run check to see if we need to dismiss the notice.
+	 * If all tests are successful then call the dismiss_notice() method.
+	 *
+	 * @access public
+	 * @since 1.0
+	 * @return void
+	 */
+	public function ajax_dismiss_gutenberg_notice() {
+
+		// Sanity check: Early exit if we're not on a wptrt_dismiss_notice action.
+		if ( ! isset( $_POST['action'] ) || 'wp_rig_dismiss_gutenberg_notice' !== $_POST['action'] ) {
+			return;
+		}
+		// Security check: Make sure nonce is OK.
+		check_ajax_referer( 'wp-rig-ajax-verification', 'security', true );
+
+		// If we got this far, we need to dismiss the notice.
+		update_option( 'wp_rig_disable_gutenberg_notice', true, false );
+	}
+	/**
+	 * Run check to see if we need to dismiss the notice.
+	 * If all tests are successful then call the dismiss_notice() method.
+	 *
+	 * @access public
+	 * @since 1.0
+	 * @return void
+	 */
+	public function ajax_dismiss_starter_notice() {
+
+		// Sanity check: Early exit if we're not on a wptrt_dismiss_notice action.
+		if ( ! isset( $_POST['action'] ) || 'wp_rig_dismiss_notice' !== $_POST['action'] ) {
+			return;
+		}
+		// Security check: Make sure nonce is OK.
+		check_ajax_referer( 'wp-rig-ajax-verification', 'security', true );
+
+		// If we got this far, we need to dismiss the notice.
+		update_option( 'wp_rig_starter_plugin_notice', true, false );
+	}
+
+	/**
+	 * Option to Install Starter Templates
+	 */
+	public function install_starter_script() {
+		wp_register_script( 'wp-rig-starter-install', get_template_directory_uri() . '/assets/js/admin-activate.min.js', array( 'jquery' ), WP_RIG_VERSION, false );
+		wp_register_script( 'wp-rig-gutenberg-deactivate', get_template_directory_uri() . '/assets/js/gutenberg-notice.min.js', array( 'jquery' ), WP_RIG_VERSION, false );
+	}
+	/**
+	 * Active Plugin Check
+	 *
+	 * @param string $plugin_base_name is plugin folder/filename.php.
+	 */
+	public static function active_plugin_check( $plugin_base_name ) {
+
+		if ( ! self::$active_plugins ) {
+			self::get_active_plugins();
+		}
+		return in_array( $plugin_base_name, self::$active_plugins, true ) || array_key_exists( $plugin_base_name, self::$active_plugins );
+	}
+	/**
+	 * Initialize getting the active plugins list.
+	 */
+	public static function get_active_plugins() {
+
+		self::$active_plugins = (array) get_option( 'active_plugins', array() );
+
+		if ( is_multisite() ) {
+			self::$active_plugins = array_merge( self::$active_plugins, get_site_option( 'active_sitewide_plugins', array() ) );
+		}
+	}
+	/**
+	 * AJAX callback to install a plugin.
+	 */
+	public function install_plugin_ajax_callback() {
+		if ( ! check_ajax_referer( 'wp-rig-ajax-verification', 'security', false ) ) {
+			wp_send_json_error( __( 'Security Error, Please reload the page.', 'wp-rig' ) );
+		}
+		if ( ! current_user_can( 'install_plugins' ) ) {
+			wp_send_json_error( __( 'Security Error, Need higher Permissions to install plugin.', 'wp-rig' ) );
+		}
+		// Get selected file index or set it to 0.
+		$status = empty( $_POST['status'] ) ? 'install' : sanitize_text_field( $_POST['status'] );
+		if ( ! function_exists( 'plugins_api' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
+		}
+		if ( ! class_exists( 'WP_Upgrader' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		}
+		$install = true;
+		if ( 'install' === $status ) {
+			$api = plugins_api(
+				'plugin_information',
+				array(
+					'slug' => 'wp-rig-starter-templates',
+					'fields' => array(
+						'short_description' => false,
+						'sections' => false,
+						'requires' => false,
+						'rating' => false,
+						'ratings' => false,
+						'downloaded' => false,
+						'last_updated' => false,
+						'added' => false,
+						'tags' => false,
+						'compatibility' => false,
+						'homepage' => false,
+						'donate_link' => false,
+					),
+				)
+			);
+			if ( ! is_wp_error( $api ) ) {
+
+				// Use AJAX upgrader skin instead of plugin installer skin.
+				// ref: function wp_ajax_install_plugin().
+				$upgrader = new \Plugin_Upgrader( new \WP_Ajax_Upgrader_Skin() );
+
+				$installed = $upgrader->install( $api->download_link );
+				if ( $installed ) {
+					$activate = activate_plugin( 'wp-rig-starter-templates/wp-rig-starter-templates.php', '', false, true );
+					if ( is_wp_error( $activate ) ) {
+						$install = false;
+					}
+				} else {
+					$install = false;
+				}
+			} else {
+				$install = false;
+			}
+		} elseif ( 'activate' === $status ) {
+			$activate = activate_plugin( 'wp-rig-starter-templates/wp-rig-starter-templates.php', '', false, true );
+			if ( is_wp_error( $activate ) ) {
+				$install = false;
+			}
+		}
+
+		if ( false === $install ) {
+			wp_send_json_error( __( 'Error, plugin could not be installed, please install manually.', 'wp-rig' ) );
+		} else {
+			wp_send_json_success();
+		}
+	}
+	/**
+	 * Filter the excerpt length to 30 words.
+	 *
+	 * @param int $length Excerpt length.
+	 * @return int (Maybe) modified excerpt length.
+	 */
+	public function custom_excerpt_length( $length ) {
+		if ( is_admin() ) {
+			return $length;
+		}
+		if ( is_search() ) {
+			if ( wp_rig()->sub_option( 'search_archive_element_excerpt', 'words' ) ) {
+				$length = intval( wp_rig()->sub_option( 'search_archive_element_excerpt', 'words' ) );
+			}
+		} else if ( 'post' === get_post_type() ) {
+			if ( wp_rig()->sub_option( 'post_archive_element_excerpt', 'words' ) ) {
+				$length = intval( wp_rig()->sub_option( 'post_archive_element_excerpt', 'words' ) );
+			}
+		} else {
+			if ( wp_rig()->sub_option( get_post_type() . '_archive_element_excerpt', 'words' ) ) {
+				$length = intval( wp_rig()->sub_option( get_post_type() . '_archive_element_excerpt', 'words' ) );
+			}
+		}
+		return $length;
+	}
+	/**
+	 * Remove comment date.
+	 *
+	 * @param string|int $date      The comment time, formatted as a date string or Unix timestamp.
+	 * @param string     $format    Date format.
+	 * @param bool       $gmt       Whether the GMT date is in use.
+	 * @param bool       $translate Whether the time is translated.
+	 * @param WP_Comment $comment   The comment object.
+	 */
+	public function remove_comment_time( $date, $format, $gmt, $translate, $comment ) {
+		if ( ! is_admin() ) {
+			return '';
+		}
+		return $date;
+	}
+	/**
+	 * Remove comment date.
+	 *
+	 * @param string|int $date    Formatted date string or Unix timestamp.
+	 * @param string     $format  The format of the date.
+	 * @param WP_Comment $comment The comment object.
+	 */
+	public function remove_comment_date( $date, $format, $comment ) {
+		if ( ! is_admin() ) {
+			return '';
+		}
+		return $date;
+	}
+	/**
+	 * Wrap embedded media for responsive embeds, pre blocks.
+	 *
+	 * @param  string $cache The oEmbed markup.
+	 * @param  string $url The URL being embedded.
+	 * @param  array  $attr An array of attributes.
+	 * @param  string $post_ID the post id.
+	 */
+	public function classic_embed_wrap( $cache, $url, $attr = array(), $post_ID = '' ) {
+		if ( doing_filter( 'the_content' ) && ! has_blocks() && ! empty( $cache ) ) {
+			$cache = '<div class="entry-content-asset videofit">' . $cache . '</div>';
+		}
+		return $cache;
 	}
 
 	/**
@@ -59,15 +392,226 @@ class Component implements Component_Interface, Templating_Component_Interface {
 	 */
 	public function template_tags() : array {
 		return array(
-			'get_version'       => array( $this, 'get_version' ),
-			'get_asset_version' => array( $this, 'get_asset_version' ),
+			'get_version'                          => array( $this, 'get_version' ),
+			'get_asset_version'                    => array( $this, 'get_asset_version' ),
+			'get_post_types'                       => array( $this, 'get_post_types' ),
+			'get_post_types_objects'               => array( $this, 'get_post_types_objects' ),
+			'get_post_types_to_ignore'             => array( $this, 'get_post_types_to_ignore' ),
+			'get_transparent_post_types_to_ignore' => array( $this, 'get_transparent_post_types_to_ignore' ),
+			'get_public_post_types_to_ignore'      => array( $this, 'get_public_post_types_to_ignore' ),
+			'customizer_quick_link'                => array( $this, 'customizer_quick_link' ),
 		);
+	}
+	/**
+	 * If in customizer output the quicklink.
+	 */
+	public static function customizer_quick_link() {
+		if ( is_customize_preview() ) {
+			?>
+			<div class="customize-partial-edit-shortcut wp-rig-custom-partial-edit-shortcut">
+				<button aria-label="<?php esc_attr_e( 'Click to edit this element.', 'wp-rig' ); ?>" title="<?php esc_attr_e( 'Click to edit this element.', 'wp-rig' ); ?>" class="customize-partial-edit-shortcut-button item-customizer-focus"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M13.89 3.39l2.71 2.72c.46.46.42 1.24.03 1.64l-8.01 8.02-5.56 1.16 1.16-5.58s7.6-7.63 7.99-8.03c.39-.39 1.22-.39 1.68.07zm-2.73 2.79l-5.59 5.61 1.11 1.11 5.54-5.65zm-2.97 8.23l5.58-5.6-1.07-1.08-5.59 5.6z"></path></svg></button>
+			</div>
+			<?php
+		}
+	}
+	/**
+	 * Get array of post types we want to exclude from use in customizer custom post type settings.
+	 *
+	 * @return array of post types.
+	 */
+	public static function get_post_types_to_ignore() {
+		if ( is_null( self::$ignore_post_types ) ) {
+			$ignore_post_types = array(
+				'post',
+				'page',
+				'product',
+				'wp_rig_element',
+				'wp_rig_conversions',
+				'wp_rig_cloud',
+				'elementor_library',
+				'kt_size_chart',
+				'kt_reviews',
+				'ele-product-template',
+				'ele-p-arch-template',
+				'ele-p-loop-template',
+				'ele-check-template',
+				'shop_order',
+				'jet-menu',
+				'jet-popup',
+				'jet-smart-filters',
+				'jet-theme-core',
+				'jet-woo-builder',
+				'jet-engine',
+				'course',
+				'lesson',
+				'llms_quiz',
+				'llms_membership',
+				'llms_certificate',
+				'llms_my_certificate',
+				'sfwd-quiz',
+				'sfwd-certificates',
+				'sfwd-lessons',
+				'sfwd-topic',
+				'sfwd-transactions',
+				'sfwd-essays',
+				'sfwd-assignment',
+				'sfwd-courses',
+				'tutor_quiz',
+				'tutor_assignments',
+				'courses',
+				'groups',
+				'forum',
+				'topic',
+				'reply',
+				'tribe_events',
+			);
+			self::$ignore_post_types = apply_filters( 'wp_rig_customizer_post_type_ignore_array', $ignore_post_types );
+		}
+
+		return self::$ignore_post_types;
+	}
+
+	/**
+	 * Get array of post types we want to exclude from use in customizer transparent header settings.
+	 *
+	 * @return array of post types.
+	 */
+	public static function get_transparent_post_types_to_ignore() {
+		if ( is_null( self::$transparent_ignore_post_types ) ) {
+			$transparent_ignore_post_types = array(
+				'post',
+				'page',
+				'product',
+				'wp_rig_element',
+				'wp_rig_conversions',
+				'wp_rig_cloud',
+				'elementor_library',
+				'fl-theme-layout',
+				'kt_size_chart',
+				'kt_reviews',
+				'shop_order',
+				'ele-product-template',
+				'ele-p-arch-template',
+				'ele-p-loop-template',
+				'ele-check-template',
+				'jet-menu',
+				'jet-popup',
+				'jet-smart-filters',
+				'jet-theme-core',
+				'jet-woo-builder',
+				'jet-engine',
+				'llms_certificate',
+				'llms_my_certificate',
+				'sfwd-quiz',
+				'sfwd-certificates',
+				'sfwd-lessons',
+				'sfwd-topic',
+				'sfwd-transactions',
+				'sfwd-essays',
+				'sfwd-assignment',
+				'tutor_quiz',
+				'tutor_assignments',
+			);
+			self::$transparent_ignore_post_types = apply_filters( 'wp_rig_transparent_post_type_ignore_array', $transparent_ignore_post_types );
+		}
+
+		return self::$transparent_ignore_post_types;
+	}
+
+	/**
+	 * Get array of post types we want to exclude from use in non public areas.
+	 *
+	 * @return array of post types.
+	 */
+	public static function get_public_post_types_to_ignore() {
+		if ( is_null( self::$public_ignore_post_types ) ) {
+			$public_ignore_post_types = array(
+				'elementor_library',
+				'fl-theme-layout',
+				'kt_size_chart',
+				'kt_reviews',
+				'shop_order',
+				'wp_rig_element',
+				'wp_rig_conversions',
+				'wp_rig_cloud',
+				'ele-product-template',
+				'ele-p-arch-template',
+				'ele-p-loop-template',
+				'ele-check-template',
+				'jet-menu',
+				'jet-popup',
+				'jet-smart-filters',
+				'jet-theme-core',
+				'jet-woo-builder',
+				'jet-engine',
+				'llms_certificate',
+				'llms_my_certificate',
+				'sfwd-certificates',
+				'sfwd-transactions',
+				'reply',
+			);
+			self::$public_ignore_post_types = apply_filters( 'wp_rig_public_post_type_ignore_array', $public_ignore_post_types );
+		}
+
+		return self::$public_ignore_post_types;
+	}
+
+	/**
+	 * Get all public post types.
+	 *
+	 * @return array of post types.
+	 */
+	public static function get_post_types() {
+		if ( is_null( self::$post_types ) ) {
+			$args             = array(
+				'public' => true,
+				'show_in_rest' => true,
+				'_builtin' => false,
+			);
+			$builtin = array(
+				'post',
+				'page',
+			);
+			$output           = 'names'; // names or objects, note names is the default.
+			$operator         = 'and';
+			$post_types       = get_post_types( $args, $output, $operator );
+			self::$post_types = apply_filters( 'wp_rig_public_post_type_array', array_merge( $builtin, $post_types ) );
+		}
+
+		return self::$post_types;
+	}
+
+	/**
+	 * Get all public post types.
+	 *
+	 * @return array of post types.
+	 */
+	public static function get_post_types_objects() {
+		if ( is_null( self::$post_types_objects ) ) {
+			$args             = array(
+				'public' => true,
+				'_builtin' => false,
+			);
+			$output           = 'objects'; // names or objects, note names is the default.
+			$operator         = 'and';
+			$post_types       = get_post_types( $args, $output, $operator );
+			self::$post_types_objects = apply_filters( 'wp_rig_public_post_type_objects', $post_types );
+		}
+
+		return self::$post_types_objects;
 	}
 
 	/**
 	 * Adds theme support for essential features.
 	 */
 	public function action_essential_theme_support() {
+		if ( 'em' === wp_rig()->sub_option( 'content_width', 'unit' ) || 'rem' === wp_rig()->sub_option( 'content_width', 'unit' ) ) {
+			$wp_rig_content_width = intval( wp_rig()->sub_option( 'content_width', 'size' ) * 17 );
+		} else {
+			$wp_rig_content_width = wp_rig()->sub_option( 'content_width', 'size' );
+		}
+		$GLOBALS['content_width'] = intval( $wp_rig_content_width ); // phpcs:ignore WPThemeReview.CoreFunctionality.PrefixAllGlobals.NonPrefixedVariableFound
+
 		// Add default RSS feed links to head.
 		add_theme_support( 'automatic-feed-links' );
 
@@ -83,16 +627,36 @@ class Component implements Component_Interface, Templating_Component_Interface {
 				'comment-list',
 				'gallery',
 				'caption',
+				'script',
+				'style',
 			)
 		);
+
+		add_theme_support( 'custom-units' );
+		add_theme_support( 'custom-line-height' );
 
 		// Add support for selective refresh for widgets.
 		add_theme_support( 'customize-selective-refresh-widgets' );
 
 		// Add support for responsive embedded content.
 		add_theme_support( 'responsive-embeds' );
-	}
 
+		if ( ! wp_rig()->option( 'post_comments_date' ) ) {
+			add_filter( 'get_comment_date', array( $this, 'remove_comment_date' ), 20, 3 );
+			add_filter( 'get_comment_time', array( $this, 'remove_comment_time' ), 20, 5 );
+		}
+
+	}
+	/**
+	 * Adds a tiny script to remove no-js class.
+	 */
+	public function action_add_no_js_remove_script() {
+		if ( ! wp_rig()->is_amp() ) {
+			?>
+			<script>document.documentElement.classList.remove( 'no-js' );</script>
+			<?php
+		}
+	}
 	/**
 	 * Adds a pingback url auto-discovery header for singularly identifiable articles.
 	 */
@@ -101,7 +665,17 @@ class Component implements Component_Interface, Templating_Component_Interface {
 			echo '<link rel="pingback" href="', esc_url( get_bloginfo( 'pingback_url' ) ), '">';
 		}
 	}
-
+	/**
+	 * Add
+	 *
+	 * @param string $markup search form markup.
+	 *
+	 * @return mixed
+	 */
+	public function add_search_icon( $markup ) {
+		$markup = str_replace( '</form>', '<div class="wp-rig-search-icon-wrap">' . wp_rig()->get_icon( 'search', '', false ) . '</div></form>', $markup );
+		return $markup;
+	}
 	/**
 	 * Adds a 'hfeed' class to the array of body classes for non-singular pages.
 	 *
@@ -112,6 +686,31 @@ class Component implements Component_Interface, Templating_Component_Interface {
 		if ( ! is_singular() ) {
 			$classes[] = 'hfeed';
 		}
+
+		return $classes;
+	}
+
+	/**
+	 * Adds a link style class to the array of body classes.
+	 *
+	 * @param array $classes Classes for the body element.
+	 * @return array Filtered body classes.
+	 */
+	public function filter_body_classes_add_link_style( array $classes ) : array {
+		if ( ! wp_rig()->option( 'enable_scroll_to_id' ) ) {
+			$classes[] = 'no-anchor-scroll';
+		}
+		if ( wp_rig()->option( 'enable_footer_on_bottom' ) ) {
+			$classes[] = 'footer-on-bottom';
+		}
+		if ( wp_rig()->option( 'enable_popup_body_animate' ) ) {
+			$classes[] = 'animate-body-popup';
+		}
+		if ( '' !== wp_rig()->option( 'header_social_brand' ) || '' !== wp_rig()->option( 'header_mobile_social_brand' ) || '' !== wp_rig()->option( 'footer_social_brand' ) ) {
+			$classes[] = 'social-brand-colors';
+		}
+		$classes[] = 'hide-focus-outline';
+		$classes[] = 'link-style-' . wp_rig()->sub_option( 'link_color', 'style' );
 
 		return $classes;
 	}
